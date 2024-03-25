@@ -219,7 +219,7 @@ impl ShapeTracker{
         return ret
     }
 
-    fn unit_stride_axes(&self, ignore_valid: bool) -> Vec<usize>{
+    pub fn unit_stride_axes(&self, ignore_valid: bool) -> Vec<usize>{
         self.real_strides(ignore_valid).iter().enumerate().filter_map(|(i ,st)|{
             if st.clone().unwrap() == BTypes::Int(1){
                 return Some(i)

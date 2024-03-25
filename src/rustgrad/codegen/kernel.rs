@@ -1,9 +1,10 @@
-use std::{any::Any, borrow::BorrowMut, collections::{HashMap, HashSet}, fmt::{Debug, Display}, ops::Deref, rc::Rc, sync::Arc};
+use std::{any::Any, borrow::{Borrow, BorrowMut}, collections::{HashMap, HashSet}, fmt::{Debug, Display}, isize::MAX, ops::Deref, rc::Rc, sync::Arc};
 
 use itertools::{iproduct, Itertools};
 use lazy_static::lazy_static;
+use num::Integer;
 
-use crate::rustgrad::{device::Device, dtype::{self, DTypes, ImageDType, DTYPES_DICT}, helpers::{dedup, flatten, get_contraction}, ops::{get_lazyop_info, BufferOps, BufferTypes, FlopCounter, Items, LazyOp, MemBuffer, Op}, shape::{shapetracker::ShapeTracker, sym::{BTypes, NodeTypes}, view::strides_for_shape}};
+use crate::rustgrad::{device::Device, dtype::{self, DTypes, ImageDType, DTYPES_DICT}, helpers::{ansilen, colored, dedup, flatten, get_contraction}, ops::{get_lazyop_info, BufferOps, BufferTypes, FlopCounter, Items, LazyOp, MemBuffer, Op}, shape::{shapetracker::ShapeTracker, sym::{BTypes, NodeTypes}, view::strides_for_shape}};
 
 lazy_static!{
     pub static ref TENSOR_CORES: Arc<HashMap<String, Vec<TensorCore>>> = {
@@ -676,6 +677,245 @@ impl Kernel{
             .collect();
         
         offsets
+    }
+    fn get_float4_upcast_dim(&self, i: usize) -> Vec<usize>{
+        let should_upcast = self.opts.supports_float4() && (match &self.bufs[i]{
+            BufferTypes::ConstBuffer(c) => DTYPES_DICT.borrow().get(&dtype::TYPES::float) == Some(&c.dtype) || DTYPES_DICT.borrow().get(&dtype::TYPES::half) == Some(&c.dtype) || match &c.dtype{
+                DTypes::ImageDType(_) => true,
+                _ => false
+            },
+            BufferTypes::LocalBuffer(l) => DTYPES_DICT.borrow().get(&dtype::TYPES::float) == Some(&l.dtype) || DTYPES_DICT.borrow().get(&dtype::TYPES::half) == Some(&l.dtype) || match &l.dtype{
+                DTypes::ImageDType(_) => true,
+                _ => false
+            },
+            BufferTypes::MemBuffer(m) => DTYPES_DICT.borrow().get(&dtype::TYPES::float) == Some(&m.dtype) || DTYPES_DICT.borrow().get(&dtype::TYPES::half) == Some(&m.dtype) || match &m.dtype{
+                DTypes::ImageDType(_) => true,
+                _ => false
+            }
+        });
+
+        if should_upcast{
+            return self.sts[i].unit_stride_axes(false).iter().filter_map(|x|{
+                if x>= self.shape_len() - self.upcasted && self.sts[i].shape()[x] > BTypes::Int(1){
+                    Some(x.clone())
+                } else{
+                    None
+                }
+            })
+        }
+    }
+    fn first_reduce(&self) -> usize {
+        let mut index = 0;
+        for (x, y) in self.sts[0].shape.iter().zip(self.full_shape.iter()) {
+            if x != y {
+                return index;
+            }
+            index += 1;
+        }
+        index
+    }
+
+    fn output_shape(&self) -> Vec<BTypes>{
+        return self.sts[0].shape()
+    }
+
+    fn full_shape(&self) -> Vec<BTypes>{
+        return self.sts[self.full_buf_index.clone()].shape()
+    }
+
+    fn full_unupcasted(&self) -> Vec<BTypes>{
+        self.full_shape()[..&self.shape_len()-&self.upcasted].collect()
+    }
+
+    fn shape_len(&self) -> usize{
+        self.sts[0].shape().len()
+    }
+
+    fn upcast_in_mid_reduce_axes(&self) -> Vec<isize>{
+        (self.first_reduce()..self.first_reduce() as isize + self.group_for_reduces).filter(|j|{
+            if &self.full_shape()[j] == &self.sts[0].shape()[j]{
+                j
+            }else{
+                None
+            }
+        })
+    }
+
+    fn global_dims(&self) -> isize{
+        return self.first_reduce() as isize -self.local_dims.clone()
+    }
+
+    fn colors(&self) -> Vec<String> {
+        // first non local non reduce dims are global (blue)
+        let mut colors = {vec!["blue".to_string(); self.global_dims];
+        if !self.dont_use_locals {
+            vec!["blue".to_string(); self.global_dims]
+        }else{
+            vec!["BLUE".to_string(); self.global_dims()]
+        }};
+        // after global are local_dims; warp ones used in tensor cores must be closest to first_reduce (cyan)
+        for _ in 0..self.local_dims {
+            colors.push("cyan".to_string());
+        }
+        // between first_reduce and first_reduce + group_for_reduces, they are either upcast mid reduce (white), or late upcasted (green)
+        for i in self.first_reduce..self.first_reduce + self.group_for_reduces {
+            if self.upcast_in_mid_reduce_axes().contains(&i) {
+                colors.push("white".to_string());
+            } else {
+                colors.push("green".to_string());
+            }
+        }
+        // between first_reduce + group_for_reduces and upcasted, they are reduce (red)
+        let reduce_count = (self.shape_len - self.upcasted) - (self.first_reduce + self.group_for_reduces);
+        for _ in 0..reduce_count {
+            colors.push("red".to_string());
+        }
+        // upcasted dimensions are reduce (magenta) or normal (yellow)
+        for i in (self.shape_len - self.upcasted)..self.shape_len {
+            if self.full_shape[i] != self.sts[0].shape[i] {
+                colors.push("magenta".to_string());
+            } else {
+                colors.push("yellow".to_string());
+            }
+        }
+        assert_eq!(colors.len(), self.shape_len, "colors size mismatch");
+        colors
+    }
+    
+    fn colored_shape(&self, pad: Option<isize>, dense: bool) -> String{
+        //pad: None, dense: False
+        let mut ret = {
+            self.full_shape().into_iter().map(|s|{
+                if !dense{
+                    match &s{
+                        BTypes::Int(_) => format!("{:4d}", s),
+                        BTypes::Node(_) => format!("{:?}", s)
+                    }
+                }else{
+                    format!("{:?}", s)
+                }
+            }).zip(self.colors().iter()).map(|(s, color)|{
+                colored(s.as_str(), Some(&s.as_str()), false)
+            }).join("_")
+        };
+
+        if let Some(p) = pad{
+            ret = ret + " " +  p as usize - ansilen(ret.as_str())
+        }
+        ret
+    }
+
+
+    // ********** base sims ****************
+
+    fn upcast(&mut self){
+        assert!(self.full_shape()[self.full_shape().len()-1] != BTypes::Int(1));
+        self.upcasted += 1
+    }
+
+    fn shift_to(self, axis: isize, amount: isize, top: bool, inset_before: Option<usize>){
+        let mut ins_bf;
+
+        if let None = inset_before{
+            ins_bf = self.shape_len();
+        }else{
+            ins_bf = inset_before.unwrap();
+        }
+        let move_axis = {
+            if top{
+                axis
+            }else{
+                axis + 1
+            }
+        };
+        if move_axis < ins_bf{
+            ins_bf += 1;
+        }
+        self.reshape_and_permute(Some(|x|{
+            let mut result = vec![];
+            result.extend_from_slice(&x[0..axis]);
+            if x[axis] > 1{
+                let amt = BTypes::Int(amount);
+                if top{
+                    result.push(amt);
+                    result.push(x[axis].floordiv(amt));
+                }else{
+                    result.push(x[axis].floordiv(amt));
+                    result.push(amt)
+                }
+            }else{
+                result.push(BTypes::Int(1));
+                result.push(BTypes::Int(1));
+            }
+        }), {
+            let mut x = (0..ins_bf).filter(|i|{
+                if i != move_axis{
+                    i
+                }else{
+                    None
+                }
+            }).collect_vec();
+
+            x.extend_from_slice(&move_axis);
+            x.extend({
+                (ins_bf..self.shape_len()+1).filter(|i|{
+                    if i != &(move_axis as usize){
+                        i
+                    }else{
+                        None
+                    }
+                })
+            });
+            Some(x)
+        })
+    }
+
+    // ****************** comp sims ****************
+
+    fn _limit_size<T>(&self, x: Vec<isize>, max_size: Vec<T>) -> Vec<isize>{
+        let mut new_shape = x;
+        for i in (0.. new_shape.len()){
+            let mut next_idx = (i + 1) % new_shape.len();
+            while new_shape[i] > max_size[i]{
+                new_shape[i] = new_shape[i].div_floor(2);
+                next_idx = {
+                    if new_shape[next_idx] <= max_size[next_idx]{
+                        next_idx
+                    }else{
+                        (next_idx + 1) % new_shape.len()
+                    }
+                };
+                new_shape[next_idx] = new_shape[next_idx] * 2;
+            }
+        }
+        return new_shape
+    }
+
+    fn limit_dims_to_max(&mut self, global_max: Vec<isize>, local_max: Vec<isize>){
+        if self.global_dims() > 0{
+            if !global_max.is_empty(){
+                 let mut tmp: Vec<isize> = global_max[..self.global_dims()];
+
+                if !local_max.is_empty(){
+                    tmp.extend_from_slice(&local_max[..self.local_dims]);
+                }
+
+                if global_max.iter().max() < self.full_shape()[..self.global_dims()].iter().max(){
+                    self.reshape_and_permute(Some(|x|{
+                        self._limit_size(x, {
+                            tmp.push(vec![MAX; self.full_shape().len() - tmp.len()]);
+                            tmp
+                        })
+                    }), None)
+                }
+                assert!(global_max.iter().max() < self.full_shape()[..self.global_dims()].max());
+                for i in (0..self.global_dims()-1){
+                    if i < global_max.len() && self.full_shape()[i] > global_max[i]{
+                        
+                    }
+                }
+            }
+        }
     }
 }
 
