@@ -43,7 +43,7 @@ fn _expr_view(view: &View, idxs: Vec<Rc<NodeTypes>>, valid: Option<Rc<NodeTypes>
 
 #[derive(Debug)]
 pub struct ShapeTracker{
-    views: Vec<Rc<View>>,
+    pub views: Vec<Rc<View>>,
     ptr: RefCell<Option<Weak<Self>>>,
 }
  impl PartialEq for ShapeTracker{
@@ -71,7 +71,7 @@ impl Add<&ShapeTracker> for &ShapeTracker{
 }
 
 impl ShapeTracker{
-    fn new(views: Vec<Rc<View>>) -> Rc<ShapeTracker>{
+    pub fn new(views: Vec<Rc<View>>) -> Rc<ShapeTracker>{
         let ret = Rc::new(ShapeTracker{views, ptr: RefCell::new(None)});
         ret.ptr.borrow_mut().replace(Rc::downgrade(&ret));
         ret 
@@ -267,7 +267,7 @@ impl ShapeTracker{
         return (idx, valid)
     }
 
-    fn axis_is_masked(&self, axis: isize) -> bool{
+    pub fn axis_is_masked(&self, axis: usize) -> bool{
         let (_, valid) = self.expr_idxs(None);
         valid.vars().into_iter().any(|v|{
             match v.deref(){
@@ -296,7 +296,7 @@ impl ShapeTracker{
 
 
     //tinygrad bug view pad takes int while this function gives it as sint...
-    fn pad(&self, arg: &Vec<(BTypes, BTypes)>) -> Rc<ShapeTracker>{
+    pub fn pad(&self, arg: &Vec<(BTypes, BTypes)>) -> Rc<ShapeTracker>{
         ShapeTracker::new({
             let mut var = self.views[0..self.views.len() - 1].to_vec();
             var.push(self.views[self.views.len() - 1].pad(arg).into());
@@ -317,7 +317,7 @@ impl ShapeTracker{
             var
         })
     }
-    pub fn permute(&self, axis: &Vec<isize>) -> Rc<ShapeTracker>{
+    pub fn permute(&self, axis: &Vec<usize>) -> Rc<ShapeTracker>{
         ShapeTracker::new({
             let mut var = self.views[0..self.views.len() - 1].to_vec();
             var.push(self.views[self.views.len() - 1].permute(axis).into());

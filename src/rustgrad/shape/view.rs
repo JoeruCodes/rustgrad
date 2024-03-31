@@ -888,9 +888,9 @@ impl View{
 
     }
 
-    pub fn permute(&self, axis: &Vec<isize>) -> View{
+    pub fn permute(&self, axis: &Vec<usize>) -> View{
         assert!(axis.iter().all(|x|{
-            x >= &0 && x < &(self.shape.len() as isize)
+            x >= &0 && x < &(self.shape.len())
         }), "invalid permute {:?} for {:?}", axis, self.shape);
 
         assert!({
@@ -900,13 +900,13 @@ impl View{
         } == self.shape.len(), "{}", format!("cant permute {:?} with {:?}", self.shape, axis));
 
         return View::create(&axis.iter().map(|a|{
-            self.shape[a.clone() as usize].clone()
+            self.shape[a.clone()].clone()
         }).collect::<Vec<BTypes>>(), Some(&axis.iter().map(|a|{
-            self.strides[a.clone() as usize].clone()
+            self.strides[a.clone()].clone()
         }).collect::<Vec<BTypes>>()), self.offset.clone(), {
             match &self.mask{
                 Some(m) => Some(axis.iter().map(|a|{
-                    m[a.clone() as usize].clone()
+                    m[a.clone()].clone()
                 }).collect::<Vec<(BTypes, BTypes)>>()),
                 None =>  None
             }
@@ -918,8 +918,8 @@ impl View{
             x != &0
         }), "{}", format!("invalid stride {:?} for {:?}", mul, self.shape));
 
-        let strides = self.strides.iter().zip(mul.iter()).map(|(z, m)| z*&BTypes::Int(m.clone() as isize)).collect_vec();
-        let new_shape = self.shape.iter().zip(mul.iter()).map(|(s, m)| (s+ &BTypes::Int((abs(m.clone()) - 1) as isize)).floordiv(&BTypes::Int(abs(m.clone()) as isize), true)).collect_vec();
+        let strides = self.strides.iter().zip(mul.iter()).map(|(z, m)| z*&BTypes::Int(m.clone())).collect_vec();
+        let new_shape = self.shape.iter().zip(mul.iter()).map(|(s, m)| (s+ &BTypes::Int((abs(m.clone()) - 1))).floordiv(&BTypes::Int(abs(m.clone())), true)).collect_vec();
         let offset = self.shape.iter().zip(self.strides.iter()).zip(mul.iter()).filter_map(|((s, z), m)|{
             if m < &0{
                 Some(&(s - &BTypes::Int(1)) * z)

@@ -102,8 +102,8 @@ lazy_static!{
 #[derive(Debug, Clone, Eq, Hash, PartialOrd, Ord)]
 pub struct DType{
     priority: isize,
-    itemsize: isize,
-    name: String,
+    pub itemsize: isize,
+    pub name: String,
     fmt: Option<char>,
     count: isize
 }
@@ -242,8 +242,8 @@ impl std::fmt::Display for DType{
 #[derive(Hash, Clone, PartialOrd, Eq, Ord)]
 pub struct PtrDType{
     priority: isize,
-    itemsize: isize,
-    name: String,
+    pub itemsize: isize,
+    pub name: String,
     fmt: Option<char>,
     count: isize
 }
@@ -320,11 +320,11 @@ impl Debug for PtrDType{
 pub struct ImageDType{
     priority: isize,
     itemsize: isize,
-    name: String,
+    pub name: String,
     fmt: Option<char>,
     count: isize,
     pub shape: Vec<isize>,
-    base: DType
+    pub base: DType
 }
 
 impl ImageDType{
@@ -511,7 +511,7 @@ impl DTypes{
         }
     }
 
-    fn name(&self) -> String{
+    pub fn name(&self) -> String{
         match self{
             DTypes::DType(d) => d.name.clone(),
             DTypes::ImageDType(d) => d.name.clone(),

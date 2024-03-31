@@ -92,7 +92,7 @@ struct ScheduleItem{
 #[derive(Clone)]
 pub struct LazyOp{
     pub op: Op,
-    src: Vec<Rc<LazyOp>>,
+    pub src: Vec<Rc<LazyOp>>,
     pub arg: Option<Items>,
     ptr: RefCell<Option<Weak<Self>>>
 }
@@ -200,7 +200,7 @@ impl Hash for LazyOp{
 #[derive(Clone)]
 pub struct FlopCounter{
     shape: Vec<isize>,
-    dtype: DTypes,
+    pub dtype: DTypes,
     flops: BTypes,
     mem: HashMap<usize, usize>
 }

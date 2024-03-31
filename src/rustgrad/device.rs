@@ -51,7 +51,7 @@ impl _Device{
         }
     }
 
-    fn __get_canonicalize_item(self, ix: &str) -> Result<Compiled, Option<Compiled>>
+    fn __get_canonicalize_item(self, ix: &str) -> Option<Compiled>
     {
         let x: String = ix.split(":").next().unwrap().to_uppercase();
         let module_name = format!("tinygrad.runtime.ops_{}", x.to_lowercase());
@@ -70,9 +70,9 @@ impl _Device{
         }
         
         if compiled.is_empty(){
-            Err(None)
+            None
         }else{
-            Ok(compiled.pop().unwrap())
+            Some(compiled.pop().unwrap())
         }
     }
 
@@ -96,7 +96,7 @@ impl _Device{
         let devices = ["METAL", "HSA", "CUDA", "GPU", "LLVM", "CLANG"];
 
         for device in devices.iter() {
-            if self.index(*device).is_ok() {
+            if self.index(*device).is_some(){
                 return device.to_string();
             }
         }
@@ -104,7 +104,7 @@ impl _Device{
         panic!()
     }
 
-    pub fn index(&self, index: &str) -> Result<Compiled, Option<Compiled>>{
+    pub fn index(&self, index: &str) -> Option<Compiled>{
        self.__get_canonicalize_item(&self.canonicalize(Some(index)))
     }
 }

@@ -6,6 +6,7 @@ use itertools::Itertools;
 use lazy_static::lazy_static;
 use libloading::{Library, Symbol};
 use lru::LruCache;
+use num::integer;
 use num_traits::{Num, One};
 use regex::Regex;
 use rusqlite::types::FromSql;
@@ -28,7 +29,7 @@ use std::io::{self, Write};
 use std::iter::Flatten;
 use std::iter::Product;
 use std::num::NonZeroUsize;
-use std::ops::Mul;
+use std::ops::{Add, Div, Mul, Sub};
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -52,24 +53,11 @@ lazy_static! {
     pub static ref GRAPH: Arc<Mutex<ContextVar>> = Arc::new(Mutex::new(ContextVar::new("GRAPH", 0)));
     pub static ref MERGE_VIEW: Arc<Mutex<ContextVar>> = Arc::new(Mutex::new(ContextVar::new("MERGE_VIEW", 0)));
     pub static ref REPR: Arc<Mutex<ContextVar>> = Arc::new(Mutex::new(ContextVar::new("REPR", 0)));
-    pub static ref GRAPHPATH: Arc<String> =  match getenv("GRAPHPATH".to_string(), "/temp/net".to_string()){
-        Ok(s) => Arc::new(s),
-        Err(s) => Arc::new(s)
-    };
+    pub static ref GRAPHPATH: Arc<String> =  Arc::new(getenv("GRAPHPATH".to_string(), "/temp/net".to_string()));
 
-
-    pub static ref CACHE_DIR: Arc<String> = match getenv("XDG_CACHE_HOME".to_string(), home_dir().map_or("".to_string(), |home| home.join(if *Arc::clone(&OSX) { "Library/Caches" } else { ".cache" }).to_string_lossy().into_owned())){
-        Ok(s) => Arc::new(s),
-        Err(s) => Arc::new(s)
-    };
-    pub static ref CACHEDB: Arc<String> = match getenv("CACHEDB".to_string(), Path::new(Arc::clone(&CACHE_DIR).as_ref()).join("rustgrad").join("cache_db").canonicalize().expect("Failed to get abs path").to_string_lossy().to_owned().to_string()){
-        Ok(s) => Arc::new(s),
-        Err(s) => Arc::new(s)
-    };
-    pub static ref CACHELEVEL: Arc<String> = match getenv("CACHELEVEL".to_string(), 2.to_string()){
-        Ok(s) => Arc::new(s),
-        Err(s) => Arc::new(s)
-    };
+    pub static ref CACHE_DIR: Arc<String> = Arc::new(getenv("XDG_CACHE_HOME".to_string(), home_dir().map_or("".to_string(), |home| home.join(if *Arc::clone(&OSX) { "Library/Caches" } else { ".cache" }).to_string_lossy().into_owned())));
+    pub static ref CACHEDB: Arc<String> = Arc::new(getenv("CACHEDB".to_string(), Path::new(Arc::clone(&CACHE_DIR).as_ref()).join("rustgrad").join("cache_db").canonicalize().expect("Failed to get abs path").to_string_lossy().to_owned().to_string()));
+    pub static ref CACHELEVEL: Arc<String> = Arc::new(getenv("CACHELEVEL".to_string(), 2.to_string()));
 
 
     pub static ref VERSION:Arc<usize> = Arc::new(1);
@@ -120,10 +108,10 @@ where
 //     temp
 // }
 
-pub fn argsort<T: Ord>(seq: &[T]) -> Vec<isize> {
+pub fn argsort<T: Ord>(seq: &[T]) -> Vec<usize> {
     let mut indices: Vec<usize> = (0..seq.len()).collect();
     indices.sort_by_key(|&i| &seq[i]);
-    indices.into_iter().map(|x| x as isize).collect_vec()
+    indices.into_iter().map(|x| x).collect_vec()
 }
 
 pub fn all_same<T: PartialEq>(items: &Vec<T>) -> bool {
@@ -134,7 +122,7 @@ pub fn all_same<T: PartialEq>(items: &Vec<T>) -> bool {
     }
 }
 
-pub fn all_int<T>(t: &Vec<T>) -> bool {
+pub fn all_int<T>(t: &[T]) -> bool {
     t.iter().all(|_| true)
 }
 
@@ -263,8 +251,9 @@ pub fn strip_parens(fst: &str) -> &str {
     fst
 }
 
-pub fn round_up(num: f64, amt: isize) -> f64 {
-    (((num + amt as f64 - 1.0) / amt as f64).floor() as isize * amt) as f64
+pub fn round_up(num: BTypes, amt: isize) -> BTypes{
+    let b_amt = BTypes::Int(amt);
+    (&(&num + &b_amt) - &BTypes::Int(1)).floordiv(&b_amt, true)
 }
 
 pub fn merge_maps<T, U>(maps: impl IntoIterator<Item = HashMap<T, U>>) -> HashMap<T, U>
@@ -394,7 +383,7 @@ pub fn to_function_name(s: String) -> String {
 }
 
 #[cached]
-pub fn getenv(k: String, default: String) -> Result<String, String> {
+pub fn getenv(k: String, default: String) -> String {
     // let cache_clone = Arc::clone(&CACHE_LRU);
     // let mut cache = cache_clone.lock().unwrap();
 
@@ -406,11 +395,11 @@ pub fn getenv(k: String, default: String) -> Result<String, String> {
         Ok(value) => {
             let result = value.parse().unwrap_or_else(|_| default.clone());
             // cache.put(Arc::new(key.to_string()), Arc::new(result.clone()));
-            Ok(result)
+            result
         }
         Err(_) => {
             // cache.put(Arc::new(key.to_string()), Arc::new(default.clone()));
-            Err(default)
+            default
         }
     }
 }
@@ -523,10 +512,7 @@ impl ContextVar {
             };
         }
 
-        let result = match getenv(key.to_string(), default_value.to_string()) {
-            Ok(value) => value.parse().unwrap_or(default_value),
-            Err(_) => default_value,
-        };
+        let result: isize =  getenv(key.to_string(), default_value.to_string()).parse().unwrap();
 
         cache.put(Arc::new(key.to_string()), Arc::new(result.to_string()));
 

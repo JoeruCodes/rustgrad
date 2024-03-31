@@ -2009,6 +2009,16 @@ impl Rem<&isize> for &NodeTypes {
     }
 }
 
+
+impl Rem<&isize> for &BTypes{
+    type Output = BTypes;
+    fn rem(self, rhs: &isize) -> Self::Output {
+        match self{
+            BTypes::Int(i) => BTypes::Int(i % rhs),
+            BTypes::Node(n) => BTypes::Node(n.clone().deref() % rhs)
+        }
+    }
+}
 impl Rem<&NodeTypes> for &isize {
     type Output = N;
 
