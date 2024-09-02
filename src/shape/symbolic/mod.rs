@@ -49,7 +49,7 @@ pub trait SumSeq<B, Min, Max>: Node<B, Min, Max>
 }
 
 impl<B, Min, Max> CastAny for dyn Node<B, Min, Max>
-where dyn Node<B, Min, Max>: Sized
+where dyn Node<B, Min, Max>: Sized, Max: 'static, Min: 'static, B: 'static
 {
 
 }
