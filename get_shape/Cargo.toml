@@ -1,0 +1,6 @@
+[package]
+name = "get_shape"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
